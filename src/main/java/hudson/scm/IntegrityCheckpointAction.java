@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Map;
+import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -18,7 +19,12 @@ import javax.servlet.ServletException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.codehaus.groovy.control.CompilationFailedException;
-import org.codehaus.groovy.control.CompilerConfiguration;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.RejectedAccessException;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.GroovySandbox;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.groovy.SecureGroovyScript;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.whitelists.ProxyWhitelist;
+import org.jenkinsci.plugins.scriptsecurity.sandbox.whitelists.StaticWhitelist;
+import org.jenkinsci.plugins.scriptsecurity.scripts.ApprovalContext;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
@@ -28,7 +34,6 @@ import com.mks.api.response.Response;
 import com.mks.api.response.WorkItem;
 
 import groovy.lang.Binding;
-import groovy.lang.GroovyShell;
 import hudson.AbortException;
 import hudson.Extension;
 import hudson.Launcher;
@@ -45,7 +50,7 @@ import hudson.tasks.Notifier;
 import hudson.tasks.Publisher;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
-import hudson.util.Secret;
+import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
 
 
@@ -75,23 +80,18 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
    * @param env Environment containing the name/value pairs for substitution
    * @param expression Groovy expression string
    * @return Resolved string
+   * @throws Exception 
    */
-  public static String evalGroovyExpression(Map<String, String> env, String expression)
+  public static String evalGroovyExpression(Map<String, String> env, String expression) throws Exception
   {
     Binding binding = new Binding();
-    binding.setVariable("env", env);
-    binding.setVariable("sys", System.getProperties());
-    CompilerConfiguration config = new CompilerConfiguration();
-    // config.setDebug(true);
-    GroovyShell shell = new GroovyShell(binding, config);
-    Object result = shell.evaluate("return \"" + expression + "\"");
-    if (result == null)
-    {
-      return "";
-    } else
-    {
-      return result.toString().trim();
-    }
+	binding.setVariable("env", env);
+	// binding.setVariable("sys", System.getProperties());
+	ClassLoader loader = GroovySandbox
+			.createSecureClassLoader(Jenkins.getActiveInstance().getPluginManager().uberClassLoader);
+	Object result = new SecureGroovyScript("return \"" + expression + "\"", true, null)
+			.configuring(ApprovalContext.create()).evaluate(loader, binding);
+    return Objects.toString(result.toString().trim(), "");
   }
 
   /**
@@ -183,7 +183,7 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
   /**
    * Sets the build configuration name for this project
    * 
-   * @param configurationName
+   * @param thisBuild
    */
   private void setConfigurationName(AbstractBuild<?, ?> thisBuild)
   {
@@ -260,9 +260,9 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
     IntegrityConfigurable serverConf = getProjectSettings(build);
     // Evaluate the groovy tag name
     Map<String, String> env = build.getEnvironment(listener);
-    String chkptLabel = IntegrityCheckpointAction.evalGroovyExpression(env, checkpointLabel);
     try
     {
+      String chkptLabel = IntegrityCheckpointAction.evalGroovyExpression(env, checkpointLabel);
       // Get information about the project
       IntegrityCMProject siProject = IntegritySCM.findProject(getConfigurationName());
       if (null != siProject)
@@ -315,7 +315,7 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
       }
     } catch (APIException aex)
     {
-      LOGGER.severe("API Exception caught...");
+      LOGGER.log(Level.SEVERE, "API Exception", aex);
       ExceptionHandler eh = new ExceptionHandler(aex);
       aex.printStackTrace(listener.fatalError(eh.getMessage()));
       LOGGER.severe(eh.getMessage());
@@ -323,11 +323,15 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
       return false;
     } catch (SQLException sqlex)
     {
-      LOGGER.severe("SQL Exception caught...");
+      LOGGER.log(Level.SEVERE, "SQL Exception", sqlex);
       listener.getLogger().println("A SQL Exception was caught!");
       listener.getLogger().println(sqlex.getMessage());
       LOGGER.log(Level.SEVERE, "SQLException", sqlex);
       return false;
+    } catch (Exception e) {
+      LOGGER.log(Level.SEVERE, "Exception", e);
+      listener.getLogger().println("An Exception was caught!");
+      listener.getLogger().println(e.getMessage());
     }
 
     return true;
@@ -424,7 +428,7 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
     /**
      * Provides a list box for users to choose from a list of Integrity Server configurations
      * 
-     * @param configuration Simple configuration name
+     * @param serverConfig Simple configuration name
      * @return
      */
     public ListBoxModel doFillServerConfigItems(@QueryParameter String serverConfig)
@@ -449,7 +453,15 @@ public class IntegrityCheckpointAction extends Notifier implements Serializable
         {
           return FormValidation
               .error("Check if quotes, braces, or brackets are balanced. " + e.getMessage());
-        }
+        } catch (Exception e) {
+			if(e instanceof RejectedAccessException){
+				return FormValidation
+	                    .error("Unapproved Script. Please provide approval before usage: " + e.getMessage());
+			}
+			else{
+				return FormValidation.error(e.getMessage());
+			}
+		}
 
         if (null != s)
         {

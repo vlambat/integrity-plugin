@@ -17,6 +17,7 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.logging.Level;
@@ -176,46 +177,6 @@ public final class IntegrityCMMember
 
     Response response = command.execute(api);
     return BooleanUtils.toBoolean(response.getExitCode(), 0, 1);
-  }
-
-  /**
-   * Performs a revision info on this Integrity Source File
-   * 
-   * @param configPath Full project configuration path
-   * @param memberID Member ID for this file
-   * @param memberRev Member Revision for this file
-   * @return User responsible for making this change
-   * @throws AbortException
-   * @throws APICommandException
-   */
-  public static String getAuthorFromRevisionInfo(String serverConfigId, String configPath,
-      String memberID, String memberRev) throws AbortException
-  {
-    String author = "unknown";
-
-    // Construct the revision-info command
-    IAPICommand command = CommandFactory.createCommand(IAPICommand.REVISION_INFO_COMMAND,
-        DescriptorImpl.INTEGRITY_DESCRIPTOR.getConfiguration(serverConfigId));
-    command.addOption(new APIOption(IAPIOption.PROJECT, configPath));
-    command.addOption(new APIOption(IAPIOption.REVISION, memberRev));
-    command.addSelection(memberID);
-
-    Response response;
-    try
-    {
-      response = command.execute();
-      author = APIUtils.getAuthorInfo(response, memberID);
-
-    } catch (APIException aex)
-    {
-      ExceptionHandler eh = new ExceptionHandler(aex);
-      LOGGER.severe("API Exception caught...");
-      LOGGER.severe(eh.getMessage());
-      LOGGER.fine(eh.getCommand() + " returned exit code " + eh.getExitCode());
-      aex.printStackTrace();
-    }
-
-    return author;
   }
 
   /**
@@ -631,6 +592,13 @@ public final class IntegrityCMMember
     public boolean equals(Object obj)
     {
       return this.memberName.equals(((CPMember) obj).getMemberName());
+    }
+    
+    @Override
+    public int hashCode() {
+    	return Objects.hash(
+                super.hashCode(),
+                this.memberName);
     }
   }
 

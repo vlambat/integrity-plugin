@@ -24,7 +24,6 @@ import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Notifier;
 import hudson.tasks.Publisher;
 import hudson.util.ListBoxModel;
-import hudson.util.Secret;
 import net.sf.json.JSONObject;
 
 public class IntegrityCheckinAction extends Notifier implements Serializable
@@ -208,8 +207,15 @@ public class IntegrityCheckinAction extends Notifier implements Serializable
     }
 
     // Create our Integrity check-in task
-    IntegrityCheckinTask ciTask = new IntegrityCheckinTask(ciConfigPath, ciWorkspaceDir, includes,
-        excludes, build, listener, getProjectSettings(build));
+    IntegrityCheckinTask ciTask;
+	try {
+		ciTask = new IntegrityCheckinTask(ciConfigPath, ciWorkspaceDir, includes,
+		    excludes, build, listener, getProjectSettings(build));
+	} catch (Exception e) {
+		LOGGER.fine("Exception Caught!  Skipping Integrity Checkin step! :"+ e.getMessage());
+	    listener.getLogger().println("Exception Caught!  Skipping Integrity Checkin step!"+ e.getMessage());
+	    return true;
+	}
 
     // Execute the check-in task and return the overall result
     return build.getWorkspace().act(ciTask);
